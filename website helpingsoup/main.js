@@ -17,6 +17,7 @@ window.addEventListener("DOMContentLoaded",function () {
         status.innerHTML = "Thanks!";
     }
     //filling inside of html error
+    //monkey
     function error() {
         status.classList.add('error');
         status.innerHTML = "An error has occured"
