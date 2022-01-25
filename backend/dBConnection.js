@@ -1,5 +1,7 @@
 const mysql = require('mysql2');
 const dotenv = require('dotenv').config({path:__dirname+'/.env'});
+const LocalStrategy = require('passport-local').Strategy
+const bcrypt = require('bcrypt')
 var queryList = [];
 
 
@@ -121,7 +123,7 @@ class DbService{
             console.log(error);
         }
     }
-    async getLogin(email, password){
+    async getPassword(email, password){
         try{
             const response = await new Promise((resolve, reject) => {
                 const query = "SELECT volunteerPassword FROM helpingsoupdb.volunteer WHERE volunteerEmail = ?;";
@@ -424,8 +426,39 @@ class DbService{
             console.log(error);
         }
     }
-}
 
+    async getLogin(email){
+        try{
+            const response = await new Promise((resolve, reject) => {
+                const query = "SELECT volunteerId as id, volunteerFirstName as name, volunteerPassword as password, volunteerEmail as email FROM helpingsoupdb.volunteer WHERE volunteerEmail = ?;";
+                this.dbPool.query(query, [email], (err, results) => {
+                    if (err) reject(new Error(err.message));
+                    resolve(results[0]);
+                })
+            })
+            console.log(response);
+            return response;
+        } catch(error){
+            console.log(error);
+        }
+    }
+
+    async getUserById(id){
+        try{
+            const response = await new Promise((resolve, reject) => {
+                const query = "SELECT volunteerId as id, volunteerFirstName as name, volunteerPassword as password, volunteerEmail as email FROM helpingsoupdb.volunteer WHERE volunteerId = ?;";
+                this.dbPool.query(query, [id], (err, results) => {
+                    if (err) reject(new Error(err.message));
+                    resolve(results[0]);
+                })
+            })
+            console.log(response);
+            return response;
+        } catch(error){
+            console.log(error);
+        }
+    }
+}
 
 /** 
 class DbService {

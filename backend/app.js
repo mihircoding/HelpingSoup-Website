@@ -1,3 +1,7 @@
+if (process.env.NODE_ENV !== 'production') {
+    require('dotenv').config()
+}
+
 const express = require('express');
 const app = express();
 const mysql = require("mysql");
@@ -6,15 +10,32 @@ const dotenv = require('dotenv');
 const crypto = require('crypto');
 const fs = require('fs')
 const nodemailer = require('nodemailer');
-dotenv.config();
-
+const bcrypt = require('bcrypt');
+const passport = require('passport')
+const flash = require('express-flash');
+const session = require('express-session')
 const DbService = require('./dBConnection.js');
+const initializePassport = require('./passport-config.js')
 
+dotenv.config();
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({extended:false}));
+app.use(flash())
+app.use(passport.initialize())
+app.use(passport.session())
+app.use(session({
+    secret: process.env.SESSION_SECRET,
+    resave: false,
+    saveUninitialized: false
+}))
 
-var userEmail = null;
+
+new initializePassport(
+    passport,
+     email => user.find(user => user.email === email),
+     id => user.find(user => user.id === id)
+)
 
 var transporter = nodemailer.createTransport({
     service: process.env.EMAIL_HOST,
@@ -25,11 +46,12 @@ var transporter = nodemailer.createTransport({
 });
 var frontEnd = process.env.FRONTEND_DOMAIN;
 var backEnd = process.env.DOMAIN;
+
 //POST CALLS
 app.post('/volunteerSignUp', (request, response) =>{
     const formData = request.body;
     const db = DbService.getDbServiceInstance();
-    const result1 = db.getLogin(formData.email)
+    const result1 = db.getPassword(formData.email)
     result1
     .then(data => {
         if(data.length > 0){
@@ -40,9 +62,11 @@ app.post('/volunteerSignUp', (request, response) =>{
             if(formData.emailOpt == "true"){
                 opt = 1;
             }
+            const hashedPass = bcrypt.hash(formData.password, 10);
+            console.log("this is the hash " + hashedPass);
             const result2 = db.insertVolunteer(formData.firstName, formData.lastName, formData.email,
                 formData.address, formData.city, formData.state,
-                 formData.zip, formData.school, formData.password, opt);
+                 formData.zip, formData.school, hashedPass, opt);
            result2
            .then(response.json({success: true}));
         }
@@ -52,16 +76,14 @@ app.post('/volunteerSignUp', (request, response) =>{
 app.post('/volunteerLogin', (request, response) => {
     const formData = request.body;
     const db = DbService.getDbServiceInstance();
-    const result = db.getLogin(formData.email, formData.password);
+    const result = db.getPassword(formData.email, formData.password);
     result
     .then(data => {
-        pass = []
-        for(var i = 0; i < data.length; i++){
-            pass.push(data[i].volunteerPassword);
+        if (checkNotAuthenticated(request,response)) {
+            var canLogin = true;
         }
-        var canLogin = false;
-        for(var i = 0; i < pass.length; i++){
-            if(pass[i] == formData.password) canLogin = true;
+        else{
+            var canLogin = false;
         }
         response.json({CanLogin: canLogin});
     });
@@ -159,7 +181,7 @@ app.post('/donation', (request, response) => {
 app.get('/optout', (request, response) => {
     const db = DbService.getDbServiceInstance();
   
-    db.changeOptIn(request.query.email);
+    db.changeOptIn(request.user.email);
     response.writeHead(302, {Location: frontEnd + '/frontend/pages/changedOptIn.html'});
     response.end();
 });
@@ -181,7 +203,7 @@ app.get('/user/reset-password', (request, response) => {
     db.deleteTokens(curDate);
 
     //find token
-    const result = db.findToken(request.query.email, request.query.token);
+    const result = db.findToken(request.user.email, request.query.token);
     result
     .then(data => {
         if(data.length > 0){
@@ -189,7 +211,7 @@ app.get('/user/reset-password', (request, response) => {
             //login.navigate('http://' + process.env.FRONTEND_DOMAIN + '/frontend/pages/forgetpassword.html');
             //response.writeHead(302, {Location: 'http://' + process.env.FRONTEND_DOMAIN + '/frontend/pages/forgetpassword.html'});
             response.writeHead(302, {Location: frontEnd + '/frontend/pages/forgotpassword.html'});
-            userEmail = request.query.email;
+            userEmail = request.user.email;
             response.end();
         }
         else{
@@ -213,7 +235,7 @@ app.get('/api/GetAllOrders', (request, response) => {
 });
 
 app.get('/api/GetAllSelectedOrders', (request, response) => {
-    const email = request.query.volunteerEmail;
+    const email = request.user.email;
     const db = DbService.getDbServiceInstance();
     const result = db.getSelectedOrders(email);
 
@@ -224,7 +246,7 @@ app.get('/api/GetAllSelectedOrders', (request, response) => {
 });
 
 app.delete('/api/delSelectedOrder', (request, response) => {
-    const ID = request.query.customerID;
+    const ID = request.user.id;
     const db = DbService.getDbServiceInstance();
     const result = db.delSelectedOrder(ID);
     result
@@ -232,7 +254,7 @@ app.delete('/api/delSelectedOrder', (request, response) => {
 });
 
 app.put('/api/updateStatus', (request, response) => {
-    const ID = request.query.customerID;
+    const ID = request.user.id;
     const Status = request.query.deliveryStatus;
     const db = DbService.getDbServiceInstance();
     const result = db.updateInProgress(ID,Status);
@@ -268,7 +290,7 @@ app.put('/api/updateStatus', (request, response) => {
 });
 
 app.get('/api/getFirstName', (request,response) => {
-    const email = request.query.volunteerEmail;
+    const email = request.user.email;
     const db = DbService.getDbServiceInstance();
     const result = db.getFirstName(email);
     result
@@ -295,5 +317,24 @@ function timeConvert (time){
     }
     return time;
 }
+
+function checkAuthenticated(req,res,next) {
+    if (req.isAuthenticated()) {
+        return next()
+    }
+
+    res.redirect('/login')
+}
+
+
+function checkNotAuthenticated(req,res,next) {
+    if (req.isAuthenticated()) {
+        return true;
+    }
+    else{
+        return false;
+    }
+}
+
 
 app.listen(process.env.PORT, () => console.log('app is running'));
